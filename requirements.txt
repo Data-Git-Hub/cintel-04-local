@@ -1,0 +1,6 @@
+plotly
+shiny
+shinywidgets
+palmerpenguins
+matplotlib
+seaborn

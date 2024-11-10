@@ -1,6 +1,9 @@
-plotly
-shiny
-shinywidgets
+faicons
 palmerpenguins
-matplotlib
+pandas
+pyarrow
+plotly
 seaborn
+shiny
+shinylive
+shinywidgets

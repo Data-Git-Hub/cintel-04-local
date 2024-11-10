@@ -1,3 +1,6 @@
+import os
+os.environ['TCL_LIBRARY'] = r"C:\Program Files\Python313\tcl\tcl8.6"
+os.environ['TK_LIBRARY'] = r"C:\Program Files\Python313\tcl\tk8.6"
 import plotly.express as px
 from shiny.express import input, ui
 from shinywidgets import render_plotly

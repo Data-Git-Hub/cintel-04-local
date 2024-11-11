@@ -1,190 +1,176 @@
+import os
+import asyncio
 import plotly.express as px
-from shiny.express import input, ui
-from shinywidgets import render_plotly
-from palmerpenguins import load_penguins
+from shiny import App, ui, render, reactive, Inputs
 import seaborn as sns
 import matplotlib.pyplot as plt
-from shiny import render, reactive
+import pandas as pd
+from palmerpenguins import load_penguins
+
+# Set environment variables for TCL and TK
+os.environ['TCL_LIBRARY'] = r"C:\Program Files\Python313\tcl\tcl8.6"
+os.environ['TK_LIBRARY'] = r"C:\Program Files\Python313\tcl\tk8.6"
+
+# Use the Agg backend for Matplotlib (for headless environments)
+plt.switch_backend('Agg')
 
 # Load the palmerpenguins dataset
 penguins = load_penguins()
 
-# Set up the UI with tabs and sidebar layout
-ui.page_opts(title="Penguins are Cool", fillable=True)
+# Define the server logic
+def server(Inputs, output, session):
+    # Reactive function for filtered data based on the slider input
+    @reactive.Calc
+    def filtered_data():
+        return penguins[penguins["bill_length_mm"] <= Inputs.slider()]
 
-with ui.navset_pill(id="tab"):
-    # Graphics tab with sidebar layout
-    with ui.nav_panel("Graphics"):
-        with ui.layout_sidebar():
-            with ui.sidebar(open="open", bg="#f8f8f8"):
-                ui.h2("Sidebar")
-                ui.input_slider(
-                    "slider", "Max Bill Length (mm)", min=33, max=60, value=45
-                )
-                ui.input_selectize(
-                    "selected_attribute",
-                    "Choose an Attribute",
-                    [
-                        "bill_length_mm",
-                        "bill_depth_mm",
-                        "flipper_length_mm",
-                        "body_mass_g",
-                    ],
-                )
-                ui.input_numeric(
-                    "plotly_bin_count", "Number of Plotly Bins", value=10
-                )
-                ui.hr()
-                ui.input_slider(
-                    "seaborn_bin_count",
-                    "Number of Seaborn Bins",
-                    min=5,
-                    max=50,
-                    value=20,
-                )
+    # Define a Matplotlib histogram (Plot 1)
+    def plot1():
+        fig, ax = plt.subplots()
+        data = filtered_data()
+        ax.hist(data["bill_length_mm"], bins=30, color='skyblue', edgecolor='black')
+        ax.set_title("Penguins Bill Length Histogram (Matplotlib Version)")
+        ax.set_xlabel("Bill Length (mm)")
+        ax.set_ylabel("Frequency")
+        return fig
+
+    output.plot1 = render.plot(plot1)
+
+    # Define Plot 2: Histogram for selected attribute using Matplotlib
+    @output
+    @render.plot
+    def plot2():
+        fig, ax = plt.subplots()
+        attribute = Inputs.selected_attribute()
+        ax.hist(penguins[attribute], bins=Inputs.plotly_bin_count(), color='red', edgecolor='black')
+        ax.set_title(f"Penguins {attribute.replace('_', ' ').title()} Histogram (Matplotlib Version)")
+        ax.set_xlabel(attribute.replace('_', ' ').title())
+        ax.set_ylabel("Frequency")
+        return fig
+
+    # Seaborn histogram (Plot 3)
+    def plot3():
+        fig, ax = plt.subplots()
+        sns.histplot(
+            data=penguins,
+            x="bill_length_mm",
+            bins=Inputs.seaborn_bin_count(),
+            hue="species",
+            multiple="stack",
+            ax=ax
+        )
+        ax.set_title("Palmer Penguins by Species")
+        ax.set_xlabel("Bill Length (mm)")
+        ax.set_ylabel("Number")
+        return fig
+
+    output.plot3 = render.plot(plot3)
+
+    # Reactive function to filter data based on selected species
+    @reactive.Calc
+    def filtered_df():
+        selected_species = Inputs.species()
+        return penguins[penguins["species"].isin(selected_species)]
+
+    # Define the Seaborn scatterplot (Length vs Depth)
+    @output
+    @render.plot
+    def length_depth():
+        fig, ax = plt.subplots()
+        sns.scatterplot(
+            data=filtered_df(),
+            x="bill_length_mm",
+            y="bill_depth_mm",
+            hue="species",
+            ax=ax
+        )
+        ax.set_title("Scatterplot: Bill Length vs. Bill Depth by Species")
+        ax.set_xlabel("Bill Length (mm)")
+        ax.set_ylabel("Bill Depth (mm)")
+        return fig
+
+    # Data Tab: Reactive function for body mass filter
+    @reactive.Calc
+    def filtered_data_table():
+        return penguins[penguins["body_mass_g"] <= Inputs.body_mass_slider()]
+
+    # Render Data Table
+    @output
+    @render.data_frame
+    def penguins_table():
+        return filtered_data_table()
+
+    # Reactive function for year range filter
+    @reactive.Calc
+    def filtered_data_grid():
+        start_year, end_year = Inputs.year_range_slider()
+        return penguins[(penguins["year"] >= start_year) & (penguins["year"] <= end_year)]
+
+    # Render Data Grid
+    @output
+    @render.data_frame
+    def penguins_grid():
+        return filtered_data_grid()
+
+# Define the UI layout
+app_ui = ui.page_fluid(
+    ui.navset_pill(
+        ui.nav_panel("Graphics", ui.layout_sidebar(
+            ui.sidebar(
+                ui.h2("Sidebar"),
+                ui.input_slider("slider", "Max Bill Length (mm)", min=33, max=60, value=45),
+                ui.input_selectize("selected_attribute", "Choose an Attribute", choices=[
+                    "bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g"
+                ]),
+                ui.input_numeric("plotly_bin_count", "Number of Bins for Plot2", value=10),
+                ui.hr(),
+                ui.input_slider("seaborn_bin_count", "Number of Seaborn Bins", min=5, max=50, value=20),
                 ui.input_checkbox_group(
-                    "selected_species_list",
-                    "Select Species to Display in Scatterplot",
+                    "species",
+                    "Select Species",
                     ["Adelie", "Gentoo", "Chinstrap"],
-                    selected=["Adelie", "Gentoo", "Chinstrap"],
-                    inline=True,
-                )
-                ui.hr()
-                ui.a(
-                    "Data-Git-Hub",
-                    href="https://github.com/Data-Git-Hub",
-                    target="_blank",
-                )
-
-            # Main content area for plots
-            with ui.layout_columns():
-                # Define a reactive function for filtered data
-                @reactive.Calc
-                def filtered_data():
-                    return penguins[penguins["bill_length_mm"] <= input.slider()]
-
-                @render_plotly
-                def plot1():
-                    fig = px.histogram(
-                        filtered_data(),
-                        x="bill_length_mm",
-                        title="Penguins Bill Length Histogram",
-                    )
-                    fig.update_traces(marker_line_color="black", marker_line_width=1.5)
-                    return fig
-
-                # Plot2: Attribute Histogram, affected by "Choose an Attribute"
-                @render_plotly
-                def plot2():
-                    selected_attribute = input.selected_attribute()
-                    bin_count = (
-                        input.plotly_bin_count() if input.plotly_bin_count() else None
-                    )
-                    fig = px.histogram(
-                        penguins,
-                        x=selected_attribute,
-                        title=f"Penguins {selected_attribute.replace('_', ' ').title()} Histogram",
-                        nbins=bin_count,
-                        color_discrete_sequence=["red"],
-                    )
-                    fig.update_traces(marker_line_color="black", marker_line_width=1.5)
-                    return fig
-
-            # Seaborn histogram in a card, unaffected by "Choose an Attribute"
-            with ui.layout_columns():
-                with ui.card():
-                    ui.card_header("Seaborn Histogram")
-
-                    @render.plot
-                    def plot3():
-                        fig, ax = plt.subplots()
-                        sns.histplot(
-                            data=penguins,
-                            x="bill_length_mm",  # Fixed attribute for Seaborn histogram
-                            bins=input.seaborn_bin_count(),
-                            hue="species",
-                            multiple="stack",
-                            ax=ax,
-                        )
-                        ax.set_title("Palmer Penguins by Species")
-                        ax.set_xlabel("Bill Length (mm)")
-                        ax.set_ylabel("Number")
-                        return fig
-
-                # Scatter plot in a card, unaffected by "Choose an Attribute"
-                with ui.card():
-                    ui.card_header("Plotly Scatterplot: Species")
-
-                    @render_plotly
-                    def plotly_scatterplot():
-                        filtered_penguins = penguins[
-                            penguins["species"].isin(input.selected_species_list())
-                        ]
-                        fig = px.scatter(
-                            filtered_penguins,
-                            x="body_mass_g",
-                            y="bill_depth_mm",
-                            color="species",
-                            title="Penguins Scatterplot: Body Mass vs. Bill Depth",
-                            labels={
-                                "body_mass_g": "Body Mass (g)",
-                                "bill_depth_mm": "Bill Depth (mm)",
-                            },
-                        )
-                        return fig
-
-    # Data tab with Data Table and Data Grid
-    with ui.nav_panel("Data"):
-        with ui.layout_sidebar():
-            with ui.sidebar(open="open", bg="#f8f8f8"):
-                ui.h2("Sidebar")
-                # Slider to filter the Data Table by Body Mass
-                ui.input_slider(
-                    "body_mass_slider",
-                    "Filter by Body Mass (g)",
+                    selected=["Adelie", "Gentoo", "Chinstrap"]
+                ),
+                ui.hr(),
+                ui.a("Data-Git-Hub", href="https://github.com/Data-Git-Hub", target="_blank")
+            ),
+            ui.div(
+                ui.output_plot("plot1"),
+                ui.output_plot("plot2"),
+                ui.output_plot("plot3"),
+                ui.output_plot("length_depth")
+            )
+        )),
+        ui.nav_panel("Data", ui.layout_sidebar(
+            ui.sidebar(
+                ui.h2("Sidebar"),
+                ui.input_slider("body_mass_slider", "Filter by Body Mass (g)",
                     min=penguins["body_mass_g"].min(),
                     max=penguins["body_mass_g"].max(),
-                    value=penguins["body_mass_g"].mean(),
+                    value=penguins["body_mass_g"].mean()
+                ),
+                ui.input_slider("year_range_slider", "Filter by Year", min=2007, max=2009, value=(2007, 2009))
+            ),
+            ui.div(
+                ui.card(
+                    ui.card_header("Data Table"),
+                    ui.output_data_frame("penguins_table")
+                ),
+                ui.card(
+                    ui.card_header("Data Grid"),
+                    ui.output_data_frame("penguins_grid")
                 )
-                # Range slider to filter the Data Grid by year
-                ui.input_slider(
-                    "year_range_slider",
-                    "Filter by Year",
-                    min=2007,
-                    max=2009,
-                    value=(2007, 2009),
-                )
+            )
+        ))
+    )
+)
 
-            # Layout for Data Table and Data Grid
-            with ui.layout_columns():
-                with ui.card():
-                    ui.card_header("Data Table")
+# Create the app
+app = App(app_ui, server)
 
-                    # Reactive calculation to filter data based on body mass
-                    @reactive.Calc
-                    def filtered_data_table():
-                        return penguins[
-                            penguins["body_mass_g"] <= input.body_mass_slider()
-                        ]
-
-                    # Render DataTable with filtered penguins dataset
-                    @render.data_frame
-                    def penguins_table():
-                        return render.DataTable(filtered_data_table())
-
-                with ui.card():
-                    ui.card_header("Data Grid")
-
-                    # Reactive calculation to filter data based on year range
-                    @reactive.Calc
-                    def filtered_data_grid():
-                        start_year, end_year = input.year_range_slider()
-                        return penguins[
-                            (penguins["year"] >= start_year)
-                            & (penguins["year"] <= end_year)
-                        ]
-
-                    # Render DataGrid with filtered penguins dataset
-                    @render.data_frame
-                    def penguins_grid():
-                        return render.DataGrid(filtered_data_grid())
+# Run the app with asyncio compatibility
+if __name__ == "__main__":
+    import sys
+    if sys.platform.startswith("win"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    app.run(_loop=False)
